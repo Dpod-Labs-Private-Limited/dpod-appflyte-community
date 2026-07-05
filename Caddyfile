@@ -1,0 +1,81 @@
+# Subdomain reverse proxy for the DPOD community stack.
+# One hostname per service, all on :8080 — no path prefixes, no prefix
+# stripping, no /_next collisions. A wrong host fails clearly instead of
+# silently returning the SPA.
+#
+# The SPA (localhost:8080) calls the API subdomains cross-origin, so those
+# subdomains carry CORS headers — added HERE, uniformly, overriding whatever
+# each upstream may or may not send (auth sends none; backend/extraction do).
+#
+# The browser must resolve *.localhost -> 127.0.0.1:
+#   • Chrome / Firefox do this automatically (per RFC 6761).
+#   • Safari does NOT — add to /etc/hosts:
+#       127.0.0.1  auth.localhost api.localhost extraction.localhost plugin.localhost
+
+{
+	auto_https off
+}
+
+# Reusable CORS for API subdomains: reflect the caller's Origin (required when
+# credentials are allowed — "*" is illegal then), answer preflight with 204, and
+# set headers deferred so they OVERRIDE any the upstream already sent.
+(cors) {
+	@cors_preflight method OPTIONS
+	header {
+		Access-Control-Allow-Origin "{http.request.header.origin}"
+		Access-Control-Allow-Credentials "true"
+		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "{http.request.header.access-control-request-headers}"
+		Access-Control-Max-Age "3600"
+		Vary "Origin"
+		defer
+	}
+	respond @cors_preflight 204
+}
+
+# Frontend SPA — same-origin to itself, no CORS needed.
+http://localhost:8080 {
+	reverse_proxy appflyte-web-service:3000
+}
+
+# Auth service
+http://auth.localhost:8080 {
+	import cors
+	reverse_proxy appflyte-authentication-service:5000
+}
+
+# Backend API
+http://backend.localhost:8080 {
+	import cors
+	reverse_proxy appflyte-backend-service:8000
+}
+
+# bug tracker
+http://bugtracker.localhost:8080 {
+	import cors
+	reverse_proxy appflyte-bug-tracker:80
+}
+# MinIO 
+http://minio.localhost:8080 {
+	import cors
+	reverse_proxy minio:9000
+}
+#dynamoadmin
+http://dynamoadmin.localhost:8080 {
+	reverse_proxy dynamodb-admin:8001
+}
+#mongodb ui
+http://mongoui.localhost:8080 {
+	reverse_proxy mongo-express:8081
+}
+
+http://api.localhost:8080 {
+	import cors
+
+	# handle takes a single matcher token, so use named matchers to cover both
+	# the bare prefix and its subpaths.
+	@analytics path /ameya/analytics/v1 /ameya/analytics/v1/*
+	handle @analytics {
+		reverse_proxy analytics-api:8087
+	}
+}

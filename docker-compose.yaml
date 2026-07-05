@@ -1,0 +1,527 @@
+x-common-env: &common-env
+  LICENSE_TOKEN: ${LICENSE_TOKEN}
+  LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY}
+  ROOT_USER_TOKEN: ${ROOT_USER_TOKEN}
+  GEMINI_API_KEY: ${GEMINI_API_KEY}
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+  MONGODB_URI: "mongodb://admin:admin123456@mongodb:27017/?authSource=admin&directConnection=true"
+  MONGO_DB_DATABASE: extraction-analytics
+  AWS_ACCESS_KEY_ID: admin
+  AWS_SECRET_ACCESS_KEY: admin123
+  AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+  LOCAL_TESTING_ENABLED: "true"
+  S3_BUCKET_NAME: "dpod-aws-s3"
+  APPFLYTE_AUTHORIZATION_URL: "appflyte-authorization-service:50052"
+  REDIS_HOST: appflyte-redis
+  REDIS_PORT: "6379"
+  DEPLOYMENT_MODE: community
+  DYNAMODB_ENDPOINT_URL: http://dynamodb:8000
+  DYNAMODB_ACCESS_KEY: "admin"
+  DYNAMODB_SECRET_KEY: "admin123"
+  MINIO_ENDPOINT: http://minio:9000
+  MINIO_PUBLIC_ENDPOINT: "http://minio.localhost:8080"
+  MINIO_ACCESS_KEY: admin
+  MINIO_SECRET_KEY: admin123
+
+x-appflyte-env: &appflyte-env
+  EXTERNAL_APPFLYTE_AUTHENTICATION_URL: "https://auth-dev.appflyte.net"
+  APPFLYTE_AUTHENTICATION_URL: http://appflyte-authentication-service:5000
+  APPFLYTE_BACKEND_URL: 'http://backend.localhost:8080'
+  APPFLYTE_SCHEMA_ID: "ameya_appflyte"
+  CELERY_BROKER_URL: amqp://appflyte-rabbitmq:5672//
+  CELERY_RESULT_BACKEND: redis://appflyte-redis:6379/0
+  RABBIT_HOST: appflyte-rabbitmq
+  RABBIT_PORT: "5672"
+  MCP_SERVICE_URL: "http://mcp-server:9999"
+  ANALYTICS_SERVICE_URL: "http://analytics-api:8087/ameya/analytics/v1"
+  ANALYTICS_SERVICE_PUBLIC_URL: "http://api.localhost:8080/ameya/analytics/v1" 
+  ANALYTICS_CHATBOT_PLUGIN_URL: "https://dev-test-ameya-analytics-chatbot.ameya.ai"
+  APPFLYTE_ANALYTICS_CHATBOT_PLUGIN_URL: "https://dev-test-appflyte-analytics-chatbot.ameya.ai"
+
+x-analytics-env: &analytics-env
+  PDF_PARSER_HOST_URL: "http://analytics-pdf-parser:8080"
+  MONGODB_USER_DB: user-master
+  MONGODB_MONGO_INDEX_DB: index-master
+  MONGODB_PDF_INDEX_DB: ameya-analytics-pdf
+  RABBITMQ_HOST: "analytics-rabbitmq"
+  RABBITMQ_PORT: 5672
+  CELERY_BROKER_URL: redis://appflyte-redis:6379/0
+  CELERY_RESULT_BACKEND: redis://appflyte-redis:6379/1
+  ENGINE: "ameya-analytics"
+
+x-consumer-env: &consumer-env
+  MONGO_USER_DB: user-master
+  MONGO_INDEX_DB: index-master
+  MONGO_SESSION_DB: session-master
+  OPENAI_EMBEDDING_MODEL: text-embedding-3-small
+  RABBITMQ_HOST: "analytics-rabbitmq"
+  MONGO_MCP_SERVER_URL: "http://analytics-mongo-server:9010"
+  ENABLE_CONTEXT_COMPRESSION: "true"
+  SYSTEM_IDENTITY_PATH: src/config/system_identity.json
+  SKILLS_DIR: src/config/20260330_163909/skills
+
+x-mcp-env: &mcp-env
+  RABBITMQ_HOST: "analytics-rabbitmq"
+  S3_PROVIDER: "minio"
+  S3_ENDPOINT_URL: "http://community-minio:9000"
+
+x-web-env: &web-env
+  APPFLYTE_WEB_URL: 'http://localhost:8080'
+  APPFLYTE_BACKEND_URL: 'http://backend.localhost:8080'
+  APPFLYTE_AUTHENTICATION_URL: 'http://auth.localhost:8080'
+  APPFLYTE_WEBSITE_URL: "https://d6vtdan1k5042.cloudfront.net"
+  BUGTRACKER_APP_BASE_URL: "http://bugtracker.localhost:8080"
+
+services:
+# Caddy reverse proxy — single origin (http://localhost) for frontend + APIs
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - appflyte_community_network
+    restart: always
+
+  # DPOD appflyte-web (frontend)
+  appflyte-web-service:
+    image: ghcr.io/dpod-labs-private-limited/appflyte-frontend:v1.1.0
+    container_name: appflyte-web-service
+    expose:
+      - 3000
+    environment:
+      <<: [*web-env, *common-env]
+    depends_on:
+      appflyte-backend-service:
+        condition: service_healthy
+      analytics-api:
+        condition: service_healthy
+      # Browser-facing URLs — one subdomain per service via the Caddy proxy.
+      # (The browser must resolve *.localhost; Safari needs /etc/hosts entries.)
+    networks:
+      - appflyte_community_network
+    extra_hosts:
+      - "minio.localhost:host-gateway"
+      - "extraction.localhost:host-gateway"
+    restart: always
+
+  # DPOD auth-server (authentication)
+  appflyte-authentication-service:
+    image: ghcr.io/dpod-labs-private-limited/appflyte-auth:v1.1.0
+    container_name: appflyte-authentication-service
+    expose:
+      - 5000
+    environment:
+      <<: [*appflyte-env, *common-env]
+    restart: always
+    depends_on:
+      appflyte-redis:
+        condition: service_healthy
+      appflyte-rabbitmq:
+        condition: service_healthy
+      dynamodb-init:
+        condition: service_completed_successfully
+    healthcheck:
+      # TCP liveness: app is up and listening on 5000. (Image has python, no shell.)
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1',5000),3).close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks:
+      - appflyte_community_network  
+
+  # DPOD auth-server (authorization / gRPC)
+  appflyte-authorization-service:
+    image: ghcr.io/dpod-labs-private-limited/appflyte-authz:v1.1.0
+    container_name: appflyte-authorization-service
+    environment:
+      <<: [*appflyte-env, *common-env]
+    expose:
+      - 50052
+    depends_on:
+      dynamodb-init:
+        condition: service_completed_successfully
+      appflyte-authentication-service:
+        condition: service_healthy
+    restart: always
+    networks:
+      - appflyte_community_network  
+
+  # DPOD backend API
+  appflyte-backend-service:
+    image: ghcr.io/dpod-labs-private-limited/appflyte-backend:v1.1.0
+    container_name: appflyte-backend-service
+    expose:
+      - 8000
+    # ports:
+    #   - "8012:8000"
+    environment:
+      <<: [*appflyte-env, *common-env]
+    depends_on:
+      dynamodb-init:
+        condition: service_completed_successfully
+      appflyte-authentication-service:
+        condition: service_healthy
+    healthcheck:
+      # TCP liveness: backend up and listening on 8000. (Image has python, no shell.)
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1',8000),3).close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 500s
+    extra_hosts:
+      - "minio.localhost:host-gateway"
+      - "extraction.localhost:host-gateway"
+    networks:
+      - appflyte_community_network  
+  # Celery worker
+  appflyte-celery-worker:
+    image: ghcr.io/dpod-labs-private-limited/appflyte-celery:v1.1.0
+    container_name: appflyte-celery-worker
+    environment:
+      <<: [*appflyte-env, *common-env]
+    depends_on:
+      appflyte-backend-service:
+        condition: service_healthy
+    networks:
+      - appflyte_community_network  
+    extra_hosts:
+      - "minio.localhost:host-gateway"
+      - "extraction.localhost:host-gateway"
+    restart: always
+  # Redis
+  appflyte-redis:
+    image: "redis:alpine"
+    container_name: appflyte-redis
+    networks:
+      - appflyte_community_network  
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  # RabbitMQ
+  appflyte-rabbitmq:
+    image: "rabbitmq:3.12.1-management"
+    container_name: appflyte-rabbitmq
+    networks:
+      - appflyte_community_network  
+    expose:
+      - 5672
+      - 15672
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+    # DynamoDB Admin UI
+  dynamodb-admin:
+    image: aaronshaf/dynamodb-admin
+    container_name: appflyte-dynamodb-admin
+    expose:
+      - 8001
+    environment:
+      DYNAMO_ENDPOINT: http://dynamodb:8000
+    depends_on:
+      dynamodb:
+        condition: service_healthy
+    networks:
+      - appflyte_community_network 
+    restart: always
+  # DynamoDB
+  # Bootstrap — runs once: creates the DynamoDB table and the MinIO bucket if they don't exist
+  dynamodb-init:
+    image: ghcr.io/dpod-labs-private-limited/community-init:v1.1.0
+    container_name: dynamodb-init
+    depends_on:
+      dynamodb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      - DYNAMODB_ENDPOINT_URL=http://dynamodb:8000
+      - S3_ENDPOINT_URL=http://minio:9000
+      - S3_BUCKET_NAME=dpod-aws-s3
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=admin123
+      - AWS_DEFAULT_REGION=us-east-1
+      - LICENSE_TOKEN=${LICENSE_TOKEN}
+    networks:
+      - appflyte_community_network 
+    restart: "no"
+
+  # DynamoDB (local) — does not authenticate; with -sharedDb it ignores AWS creds
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    container_name: appflyte-dynamodb
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/home/dynamodblocal/data"]
+    user: root
+    expose:
+      - 8000
+    volumes:
+      - dynamodb-data:/home/dynamodblocal/data
+    healthcheck:
+      # HTTP liveness: DynamoDB Local answers on 8000 (GET / -> 400 = up). Image has curl.
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://localhost:8000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - appflyte_community_network  
+    restart: always
+# # MongoDB Database
+  mongodb:
+    image: mongodb/mongodb-atlas-local:8.0
+    container_name: mongodb
+    environment:
+      MONGODB_INITDB_ROOT_USERNAME: admin
+      MONGODB_INITDB_ROOT_PASSWORD: admin123456
+      MONGODB_INITDB_DATABASE: admin
+    expose:
+      - 27017
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - appflyte_community_network  
+    restart: always
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Mongo Express - MongoDB UI
+  mongo-express:
+    image: mongo-express:latest
+    container_name: mongo-express-ui
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: admin
+      ME_CONFIG_MONGODB_ADMINPASSWORD: admin12345
+      ME_CONFIG_MONGODB_URL: mongodb://admin:admin123456@mongodb:27017/
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
+    expose:
+      - 8081
+    networks:
+      - appflyte_community_network  
+    restart: always
+    depends_on:
+      mongodb:
+        condition: service_healthy
+  # Minio
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=admin123
+    expose:
+      - 9000
+      - 9001
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - appflyte_community_network 
+    restart: always
+
+  # Bug tracker
+  appflyte-bug-tracker:
+    image: ghcr.io/dpod-labs-private-limited/bug-tracker-community:v1.1.0
+    container_name: appflyte-bug-tracker
+    expose:
+      - 80
+    environment:
+      APPFLYTE_AUTHENTICATION_URL: 'http://appflyte-authentication-service:5000'
+      APPFLYTE_BACKEND_URL: 'http://appflyte-backend-service:8000'
+    networks:
+      - appflyte_community_network
+    depends_on:
+      appflyte-backend-service:
+        condition: service_healthy
+    restart: always
+  # Analytics -mcp
+  mcp-server:
+    image: ghcr.io/dpod-labs-private-limited/appflyte-mcp:v1.1.0
+    container_name: mcp-server
+    environment:
+      <<: [*mcp-env, *common-env]
+    expose:
+      - 9999
+    depends_on:
+      appflyte-backend-service:
+        condition: service_healthy
+      dynamodb-init:
+        condition: service_completed_successfully
+      analytics-api:
+        condition: service_healthy
+    healthcheck:
+      # TCP liveness: app is up and listening on 9999. (Image has python, no shell.)
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1',9999),3).close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks:
+      - appflyte_community_network
+    restart: always
+  # Analytics-mcp consumer
+  mcp-consumer:
+    image: ghcr.io/dpod-labs-private-limited/appflyte-mcp:v1.1.0
+    container_name: mcp-consumer
+    environment:
+      APP_MODE: consumer
+      <<: [*common-env,*mcp-env]
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+      analytics-api:
+        condition: service_healthy
+    networks:
+      - appflyte_community_network
+    restart: always
+  # Analytics Service API
+  analytics-api:
+    image: ghcr.io/dpod-labs-private-limited/analytics-service-api:v1.1.0
+    container_name: analytics-api
+    environment:
+      <<: [*analytics-env, *common-env]
+    expose:
+      - 8087
+    restart: always
+    healthcheck:
+      # HTTP liveness matching the k8s probe: GET /ameya/analytics/v1/docs on 8087.
+      # (Image has python, no curl — use urllib.)
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8087/ameya/analytics/v1/docs',timeout=25).status==200 else 1)"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 500s
+    depends_on:
+      appflyte-backend-service:
+        condition: service_healthy
+      analytics-rabbitmq:
+        condition: service_healthy
+    networks:
+      - appflyte_community_network  
+  # analytics RabbitMQ
+  analytics-rabbitmq:
+    image: "rabbitmq:3.12.1-management"
+    container_name: analytics-rabbitmq
+    expose:
+      - 5672
+      - 15672
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - appflyte_community_network  
+  # Analytics Celery Beat
+  analytics-celery-beat:
+    image: ghcr.io/dpod-labs-private-limited/analytics-service-celery:v1.1.0
+    container_name: analytics-celery-beat
+    environment:
+      APP_MODE: beat
+      <<: [*analytics-env, *common-env]
+    depends_on:
+      analytics-rabbitmq:
+        condition: service_healthy
+      analytics-api:
+        condition: service_healthy
+    networks:
+      - appflyte_community_network  
+  # analytics Celery Worker
+  analytics-celery-worker:
+    image: ghcr.io/dpod-labs-private-limited/analytics-service-celery:v1.1.0
+    container_name: analytics-celery
+    environment:
+      APP_MODE: worker
+      <<: [*analytics-env, *common-env]
+    depends_on:
+      analytics-api:
+        condition: service_healthy
+    networks:
+      - appflyte_community_network  
+    restart: always
+
+  #Analytics Mongo server
+  analytics-mongo-server:
+    image: ghcr.io/dpod-labs-private-limited/mongo-server:v1.1.0
+    container_name: analytics-mongo-server
+    expose:
+      - 9010
+    environment:
+      <<: [*consumer-env, *common-env]
+    healthcheck:
+      # TCP liveness: app is up and listening on 9010. (Image has python, no shell.)
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1',9010),3).close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    depends_on:
+      analytics-api:
+        condition: service_healthy
+    networks:
+      - appflyte_community_network  
+    restart: always
+  #Analytics Mongo consumer
+  analytics-mongo-consumer:
+    image: ghcr.io/dpod-labs-private-limited/mongo-consumer:v1.1.0
+    container_name: analytics-mongo-consumer
+    environment:
+      <<: [*consumer-env, *common-env]
+    depends_on:
+      analytics-api:
+        condition: service_healthy
+      analytics-mongo-server:
+        condition: service_healthy
+    networks:
+      - appflyte_community_network  
+    restart: always
+# ── Volumes ───────────────────────────────────────────────────────────────────
+
+volumes:
+  redis-data:
+  rabbitmq-data:
+  dynamodb-data:
+  minio-data:
+  mongodb_data:
+  mongodb_config:
+  caddy-data:
+  caddy-config:
+
+
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+
+networks:
+  appflyte_community_network :
+    external: true
