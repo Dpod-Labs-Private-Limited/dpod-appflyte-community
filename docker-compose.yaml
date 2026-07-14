@@ -24,7 +24,7 @@ x-common-env: &common-env
   MINIO_SECRET_KEY: admin123
 
 x-appflyte-env: &appflyte-env
-  EXTERNAL_APPFLYTE_AUTHENTICATION_URL: "https://auth-dev.appflyte.net"
+  EXTERNAL_APPFLYTE_AUTHENTICATION_URL: "https://auth.ameya.ai"
   APPFLYTE_AUTHENTICATION_URL: http://appflyte-authentication-service:5000
   APPFLYTE_BACKEND_URL: 'http://backend.localhost:8080'
   APPFLYTE_SCHEMA_ID: "ameya_appflyte"
@@ -35,9 +35,9 @@ x-appflyte-env: &appflyte-env
   MCP_SERVICE_URL: "http://mcp-server:9999"
   ANALYTICS_SERVICE_URL: "http://analytics-api:8087/ameya/analytics/v1"
   ANALYTICS_SERVICE_PUBLIC_URL: "http://api.localhost:8080/ameya/analytics/v1" 
-  ANALYTICS_CHATBOT_PLUGIN_URL: "https://dev-test-ameya-analytics-chatbot.ameya.ai"
-  APPFLYTE_ANALYTICS_CHATBOT_PLUGIN_URL: "https://dev-test-appflyte-analytics-chatbot.ameya.ai"
-
+  ANALYTICS_CHATBOT_PLUGIN_URL: "https://ameya-analytics-chatbot.ameya.ai"
+  APPFLYTE_ANALYTICS_CHATBOT_PLUGIN_URL: "https://appflyte-analytics-chatbot.ameya.ai"
+  
 x-analytics-env: &analytics-env
   PDF_PARSER_HOST_URL: "http://analytics-pdf-parser:8080"
   MONGODB_USER_DB: user-master
