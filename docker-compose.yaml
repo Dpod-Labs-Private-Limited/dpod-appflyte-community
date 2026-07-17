@@ -89,7 +89,7 @@ services:
 
   # DPOD appflyte-web (frontend)
   appflyte-web-service:
-    image: ghcr.io/dpod-labs-private-limited/appflyte-frontend:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/appflyte-frontend:community-latest
     container_name: appflyte-web-service
     expose:
       - 3000
@@ -111,7 +111,7 @@ services:
 
   # DPOD auth-server (authentication)
   appflyte-authentication-service:
-    image: ghcr.io/dpod-labs-private-limited/appflyte-auth:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/appflyte-auth:community-latest
     container_name: appflyte-authentication-service
     expose:
       - 5000
@@ -137,7 +137,7 @@ services:
 
   # DPOD auth-server (authorization / gRPC)
   appflyte-authorization-service:
-    image: ghcr.io/dpod-labs-private-limited/appflyte-authz:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/appflyte-authz:community-latest
     container_name: appflyte-authorization-service
     environment:
       <<: [*appflyte-env, *common-env]
@@ -154,7 +154,7 @@ services:
 
   # DPOD backend API
   appflyte-backend-service:
-    image: ghcr.io/dpod-labs-private-limited/appflyte-backend:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/appflyte-backend:community-latest
     container_name: appflyte-backend-service
     expose:
       - 8000
@@ -181,7 +181,7 @@ services:
       - appflyte_community_network  
   # Celery worker
   appflyte-celery-worker:
-    image: ghcr.io/dpod-labs-private-limited/appflyte-celery:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/appflyte-celery:community-latest
     container_name: appflyte-celery-worker
     environment:
       <<: [*appflyte-env, *common-env]
@@ -245,7 +245,7 @@ services:
   # DynamoDB
   # Bootstrap — runs once: creates the DynamoDB table and the MinIO bucket if they don't exist
   dynamodb-init:
-    image: ghcr.io/dpod-labs-private-limited/community-init:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/community-init:community-latest
     container_name: dynamodb-init
     depends_on:
       dynamodb:
@@ -348,7 +348,7 @@ services:
 
   # Bug tracker
   appflyte-bug-tracker:
-    image: ghcr.io/dpod-labs-private-limited/bug-tracker-community:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/bug-tracker-community:community-latest
     container_name: appflyte-bug-tracker
     expose:
       - 80
@@ -363,7 +363,7 @@ services:
     restart: always
   # Analytics -mcp
   mcp-server:
-    image: ghcr.io/dpod-labs-private-limited/appflyte-mcp:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/appflyte-mcp:community-latest
     container_name: mcp-server
     environment:
       <<: [*mcp-env, *common-env]
@@ -388,7 +388,7 @@ services:
     restart: always
   # Analytics-mcp consumer
   mcp-consumer:
-    image: ghcr.io/dpod-labs-private-limited/appflyte-mcp:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/appflyte-mcp:community-latest
     container_name: mcp-consumer
     environment:
       APP_MODE: consumer
@@ -403,7 +403,7 @@ services:
     restart: always
   # Analytics Service API
   analytics-api:
-    image: ghcr.io/dpod-labs-private-limited/analytics-service-api:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/analytics-service-api:community-latest
     container_name: analytics-api
     environment:
       <<: [*analytics-env, *common-env]
@@ -445,7 +445,7 @@ services:
       - appflyte_community_network  
   # Analytics Celery Beat
   analytics-celery-beat:
-    image: ghcr.io/dpod-labs-private-limited/analytics-service-celery:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/analytics-service-celery:community-latest
     container_name: analytics-celery-beat
     environment:
       APP_MODE: beat
@@ -459,7 +459,7 @@ services:
       - appflyte_community_network  
   # analytics Celery Worker
   analytics-celery-worker:
-    image: ghcr.io/dpod-labs-private-limited/analytics-service-celery:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/analytics-service-celery:community-latest
     container_name: analytics-celery
     environment:
       APP_MODE: worker
@@ -473,7 +473,7 @@ services:
 
   #Analytics Mongo server
   analytics-mongo-server:
-    image: ghcr.io/dpod-labs-private-limited/mongo-server:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/mongo-server:community-latest
     container_name: analytics-mongo-server
     expose:
       - 9010
@@ -494,7 +494,7 @@ services:
     restart: always
   #Analytics Mongo consumer
   analytics-mongo-consumer:
-    image: ghcr.io/dpod-labs-private-limited/mongo-consumer:v1.1.0
+    image: ghcr.io/dpod-labs-private-limited/mongo-consumer:community-latest
     container_name: analytics-mongo-consumer
     environment:
       <<: [*consumer-env, *common-env]
