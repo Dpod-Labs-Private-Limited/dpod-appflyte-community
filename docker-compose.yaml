@@ -63,7 +63,7 @@ x-consumer-env: &consumer-env
 x-mcp-env: &mcp-env
   RABBITMQ_HOST: "analytics-rabbitmq"
   S3_PROVIDER: "minio"
-  S3_ENDPOINT_URL: "http://community-minio:9000"
+  S3_ENDPOINT_URL: "http://minio:9000"
 
 x-web-env: &web-env
   APPFLYTE_WEB_URL: 'http://localhost:8080'
